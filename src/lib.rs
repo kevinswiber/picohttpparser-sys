@@ -12,7 +12,7 @@ use std::ptr;
 //     size_t value_len;
 // };
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy, Debug)]
 pub struct phr_header {
     pub name: *const c_char,
     pub name_len: size_t,
@@ -39,7 +39,7 @@ impl Default for phr_header {
 //     char _state;
 // };
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy, Debug)]
 pub struct phr_chunked_decoder {
     pub bytes_left_in_chunk: size_t, // number of bytes left in current chunk
     pub consume_trailer: c_char, // if trailing headers should be consumed
