@@ -119,132 +119,236 @@ mod tests {
     use std::str;
     use super::*;
 
-    #[test]
-    fn parse_request() {
-        let buf = b"GET /hello HTTP/1.1\r\nAuthorization: Bearer 1234\r\n\r\n";
-        let mut headers: [phr_header; 100] = [phr_header::default(); 100];
-        let mut num_headers: size_t = headers.len();
-        let mut method: *const c_char = ptr::null_mut();
-        let mut path: *const c_char = ptr::null_mut();
-        let mut method_len: size_t = 0;
-        let mut path_len: size_t = 0;
-        let mut version: c_int = -1;
+    struct ParsedRequest {
+        headers: [phr_header; 100],
+        num_headers: size_t,
+        method: *const c_char,
+        method_len: size_t,
+        path: *const c_char,
+        path_len: size_t,
+        version: c_int,
+        return_code: c_int,
+    }
 
-        unsafe {
-            let ret = phr_parse_request(buf.as_ptr() as *const c_char,
-                                        buf.len(),
-                                        &mut method,
-                                        &mut method_len,
-                                        &mut path,
-                                        &mut path_len,
-                                        &mut version,
-                                        headers.as_mut_ptr(),
-                                        &mut num_headers,
-                                        0);
-            assert!(ret > 0);
-
-            let method_buffer = slice::from_raw_parts(method, method_len);
-            let method_buffer_2: &[u8] = mem::transmute(method_buffer);
-            assert_eq!(b"GET", method_buffer_2);
-
-            let path_buffer = slice::from_raw_parts(path, path_len);
-            let path_buffer_2: &[u8] = mem::transmute(path_buffer);
-            assert_eq!(b"/hello", path_buffer_2);
-
-            assert_eq!(1, version);
-
-            for header in headers.into_iter() {
-                if header.name_len == 0 {
-                    continue;
-                };
-                let name_buffer = slice::from_raw_parts(header.name, header.name_len);
-                let name_buffer_2: &[u8] = mem::transmute(name_buffer);
-                let name = str::from_utf8(&name_buffer_2 as &[u8]).unwrap();
-                assert_eq!("Authorization", name);
-
-                let value_buffer = slice::from_raw_parts(header.value, header.value_len);
-                let value_buffer_2: &[u8] = mem::transmute(value_buffer);
-                let value = str::from_utf8(&value_buffer_2 as &[u8]).unwrap();
-                assert_eq!("Bearer 1234", value);
+    impl ParsedRequest {
+        fn new() -> Self {
+            ParsedRequest {
+                headers: [phr_header::default(); 100],
+                num_headers: 100,
+                method: ptr::null_mut(),
+                method_len: 0,
+                path: ptr::null_mut(),
+                path_len: 0,
+                version: -1,
+                return_code: -3,
             }
+        }
+
+        fn method_bytes(&self) -> &[u8] {
+            slice_from_raw(self.method, self.method_len)
+        }
+
+        fn path_bytes(&self) -> &[u8] {
+            slice_from_raw(self.path, self.path_len)
         }
     }
 
-    #[test]
-    fn parse_response() {
-        let buf = b"HTTP/1.1 200 OK\r\nServer: hippoz\r\n\r\n";
-        let mut headers: [phr_header; 100] = [phr_header::default(); 100];
-        let mut num_headers: size_t = headers.len();
-        let mut msg: *const c_char = ptr::null_mut();
-        let mut msg_len: size_t = 0;
-        let mut status: c_int = 0;
-        let mut version: c_int = -1;
+    fn header_name_bytes<'a>(header: phr_header) -> &'a [u8] {
+        slice_from_raw(header.name, header.name_len)
+    }
+
+    fn header_value_bytes<'a>(header: phr_header) -> &'a [u8] {
+        slice_from_raw(header.value, header.value_len)
+    }
+
+    fn test_request(buf: &[u8], last_len: size_t) -> ParsedRequest {
+        let mut parsed = ParsedRequest::new();
 
         unsafe {
-            let ret = phr_parse_response(buf.as_ptr() as *const c_char,
-                                         buf.len(),
-                                         &mut version,
-                                         &mut status,
-                                         &mut msg,
-                                         &mut msg_len,
-                                         headers.as_mut_ptr(),
-                                         &mut num_headers,
-                                         0);
-            assert!(ret > 0);
-            assert_eq!(1, num_headers);
-            assert_eq!(200, status);
-
-            let msg_buffer = slice::from_raw_parts(msg, msg_len);
-            let msg_buffer_2: &[u8] = mem::transmute(msg_buffer);
-            assert_eq!(b"OK", msg_buffer_2);
-
-            assert_eq!(1, version);
-
-            for header in headers.into_iter() {
-                if header.name_len == 0 {
-                    continue;
-                };
-                let name_buffer = slice::from_raw_parts(header.name, header.name_len);
-                let name_buffer_2: &[u8] = mem::transmute(name_buffer);
-                let name = str::from_utf8(&name_buffer_2 as &[u8]).unwrap();
-                assert_eq!("Server", name);
-
-                let value_buffer = slice::from_raw_parts(header.value, header.value_len);
-                let value_buffer_2: &[u8] = mem::transmute(value_buffer);
-                let value = str::from_utf8(&value_buffer_2 as &[u8]).unwrap();
-                assert_eq!("hippoz", value);
-            }
+            parsed.return_code = phr_parse_request(buf.as_ptr() as *const c_char,
+                                                   buf.len(),
+                                                   &mut parsed.method,
+                                                   &mut parsed.method_len,
+                                                   &mut parsed.path,
+                                                   &mut parsed.path_len,
+                                                   &mut parsed.version,
+                                                   parsed.headers.as_mut_ptr(),
+                                                   &mut parsed.num_headers,
+                                                   last_len);
         }
+
+        parsed
+    }
+
+    fn slice_from_raw<'a>(pointer: *const c_char, len: size_t) -> &'a [u8] {
+        unsafe { mem::transmute(slice::from_raw_parts(pointer, len)) }
+    }
+
+    #[test]
+    fn simple() {
+        let buf = b"GET / HTTP/1.0\r\n\r\n";
+        let parsed = test_request(buf, 0);
+        assert_eq!(buf.len() as c_int, parsed.return_code);
+        assert_eq!(0, parsed.num_headers);
+        assert_eq!(0, parsed.version);
+        assert_eq!(b"GET", parsed.method_bytes());
+        assert_eq!(b"/", parsed.path_bytes());
+    }
+
+    #[test]
+    fn partial() {
+        let parsed = test_request(b"GET / HTTP/1.0\r\n\r", 0);
+        assert_eq!(-2, parsed.return_code);
     }
 
     #[test]
     fn parse_headers() {
-        let buf = b"Authorization: Bearer 1234\r\n\r\n";
-        let mut headers: [phr_header; 100] = [phr_header::default(); 100];
-        let mut num_headers: size_t = headers.len();
-        unsafe {
-            let ret = phr_parse_headers(buf.as_ptr() as *const c_char,
-                                        buf.len(),
-                                        headers.as_mut_ptr(),
-                                        &mut num_headers,
-                                        0);
-            assert!(ret > 0);
-            assert_eq!(1, num_headers);
+        let buf = b"GET /hoge HTTP/1.1\r\nHost: example.com\r\nCookie: \r\n\r\n";
+        let parsed = test_request(buf, 0);
 
-            for header in headers.into_iter() {
-                if header.name_len == 0 {
-                    continue;
-                };
-                let name_buffer = slice::from_raw_parts(header.name, header.name_len);
-                let name_buffer_2: &[u8] = mem::transmute(name_buffer);
-                let name = str::from_utf8(&name_buffer_2 as &[u8]).unwrap();
-                assert_eq!("Authorization", name);
+        assert_eq!(buf.len() as c_int, parsed.return_code);
+        assert_eq!(2, parsed.num_headers);
+        assert_eq!(1, parsed.version);
+        assert_eq!(b"GET", parsed.method_bytes());
+        assert_eq!(b"/hoge", parsed.path_bytes());
 
-                let value_buffer = slice::from_raw_parts(header.value, header.value_len);
-                let value_buffer_2: &[u8] = mem::transmute(value_buffer);
-                let value = str::from_utf8(&value_buffer_2 as &[u8]).unwrap();
-                assert_eq!("Bearer 1234", value);
-            }
-        }
+        assert_eq!(b"Host", header_name_bytes(parsed.headers[0]));
+        assert_eq!(b"example.com", header_value_bytes(parsed.headers[0]));
+        assert_eq!(b"Cookie", header_name_bytes(parsed.headers[1]));
+        assert_eq!(b"", header_value_bytes(parsed.headers[1]));
+    }
+
+    #[test]
+    fn multibyte_included() {
+        let buf =
+            b"GET /hoge HTTP/1.1\r\nHost: example.com\r\nUser-Agent: \xe3\x81\xb2\xe3/1.0\r\n\r\n";
+        let parsed = test_request(buf, 0);
+
+        assert_eq!(buf.len() as c_int, parsed.return_code);
+        assert_eq!(2, parsed.num_headers);
+        assert_eq!(1, parsed.version);
+        assert_eq!(b"GET", parsed.method_bytes());
+        assert_eq!(b"/hoge", parsed.path_bytes());
+
+        assert_eq!(b"Host", header_name_bytes(parsed.headers[0]));
+        assert_eq!(b"example.com", header_value_bytes(parsed.headers[0]));
+        assert_eq!(b"User-Agent", header_name_bytes(parsed.headers[1]));
+        assert_eq!(b"\xe3\x81\xb2\xe3/1.0",
+                   header_value_bytes(parsed.headers[1]));
+    }
+
+    #[test]
+    fn parse_multiline() {
+        let buf = b"GET / HTTP/1.0\r\nfoo: \r\nfoo: b\r\n  \tc\r\n\r\n";
+        let parsed = test_request(buf, 0);
+
+        assert_eq!(buf.len() as c_int, parsed.return_code);
+        assert_eq!(3, parsed.num_headers);
+        assert_eq!(0, parsed.version);
+        assert_eq!(b"GET", parsed.method_bytes());
+        assert_eq!(b"/", parsed.path_bytes());
+
+        assert_eq!(b"foo", header_name_bytes(parsed.headers[0]));
+        assert_eq!(b"", header_value_bytes(parsed.headers[0]));
+        assert_eq!(b"foo", header_name_bytes(parsed.headers[1]));
+        assert_eq!(b"b", header_value_bytes(parsed.headers[1]));
+        assert_eq!(ptr::null(), parsed.headers[2].name);
+        assert_eq!(b"  \tc", header_value_bytes(parsed.headers[2]));
+    }
+
+    #[test]
+    fn parse_header_name_with_trailing_space() {
+        let parsed = test_request(b"GET / HTTP/1.0\r\nfoo : ab\r\n\r\n", 0);
+        assert_eq!(-1, parsed.return_code);
+    }
+
+    #[test]
+    fn incomplete_1() {
+        let parsed = test_request(b"GET", 0);
+        assert_eq!(-2, parsed.return_code);
+        assert_eq!(ptr::null(), parsed.method);
+    }
+
+    #[test]
+    fn incomplete_2() {
+        let parsed = test_request(b"GET ", 0);
+        assert_eq!(-2, parsed.return_code);
+        assert_eq!(b"GET", parsed.method_bytes());
+    }
+
+    #[test]
+    fn incomplete_3() {
+        let parsed = test_request(b"GET /", 0);
+        assert_eq!(-2, parsed.return_code);
+        assert_eq!(ptr::null(), parsed.path);
+    }
+
+    #[test]
+    fn incomplete_4() {
+        let parsed = test_request(b"GET / ", 0);
+        assert_eq!(-2, parsed.return_code);
+        assert_eq!(b"/", parsed.path_bytes());
+    }
+
+    #[test]
+    fn incomplete_5() {
+        let parsed = test_request(b"GET / H", 0);
+        assert_eq!(-2, parsed.return_code);
+    }
+
+    #[test]
+    fn incomplete_6() {
+        let parsed = test_request(b"GET / HTTP/1.", 0);
+        assert_eq!(-2, parsed.return_code);
+    }
+
+    #[test]
+    fn incomplete_7() {
+        let parsed = test_request(b"GET / HTTP/1.0", 0);
+        assert_eq!(-2, parsed.return_code);
+    }
+
+    #[test]
+    fn incomplete_8() {
+        let parsed = test_request(b"GET / HTTP/1.0\r", 0);
+        assert_eq!(-2, parsed.return_code);
+    }
+
+    #[test]
+    fn slowloris_incomplete() {
+        let buf = b"GET /hoge HTTP/1.0\r\n\r";
+        let parsed = test_request(buf, buf.len() - 1);
+        assert_eq!(-2, parsed.return_code);
+    }
+
+    #[test]
+    fn slowloris_complete() {
+        let buf = b"GET /hoge HTTP/1.0\r\n\r\n";
+        let parsed = test_request(buf, buf.len() - 1);
+        assert_eq!(buf.len() as c_int, parsed.return_code);
+    }
+
+    #[test]
+    fn empty_header_name() {
+        let parsed = test_request(b"GET / HTTP/1.0\r\n:a\r\n\r\n", 0);
+        assert_eq!(-1, parsed.return_code);
+    }
+
+    #[test]
+    fn header_name_space_only() {
+        let parsed = test_request(b"GET / HTTP/1.0\r\n :a\r\n\r\n", 0);
+        assert_eq!(-1, parsed.return_code);
+    }
+
+    #[test]
+    fn nul_in_method() {
+        let parsed = test_request(b"G\0T / HTTP/1.0\r\n\r\n", 0);
+        assert_eq!(-1, parsed.return_code);
+    }
+
+    #[test]
+    fn tab_in_method() {
+        let parsed = test_request(b"G\tT / HTTP/1.0\r\n\r\n", 0);
+        assert_eq!(-1, parsed.return_code);
     }
 }

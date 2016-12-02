@@ -4,6 +4,7 @@ fn main() {
     gcc::Config::new()
         .file("deps/picohttpparser/picohttpparser.c")
         .include("deps/picohttpparser")
+        .flag("-msse4")
         .compile("libpicohttpparser.a");
 
     println!("cargo:rustc-link-search=native={}",
