@@ -119,8 +119,12 @@ mod tests {
     use std::str;
     use super::*;
 
+    fn slice_from_raw<'a>(pointer: *const c_char, len: size_t) -> &'a [u8] {
+        unsafe { mem::transmute(slice::from_raw_parts(pointer, len)) }
+    }
+
     struct ParsedRequest {
-        headers: [phr_header; 100],
+        headers: [phr_header; 4],
         num_headers: size_t,
         method: *const c_char,
         method_len: size_t,
@@ -133,8 +137,8 @@ mod tests {
     impl ParsedRequest {
         fn new() -> Self {
             ParsedRequest {
-                headers: [phr_header::default(); 100],
-                num_headers: 100,
+                headers: [phr_header::default(); 4],
+                num_headers: 4,
                 method: ptr::null_mut(),
                 method_len: 0,
                 path: ptr::null_mut(),
@@ -178,10 +182,6 @@ mod tests {
         }
 
         parsed
-    }
-
-    fn slice_from_raw<'a>(pointer: *const c_char, len: size_t) -> &'a [u8] {
-        unsafe { mem::transmute(slice::from_raw_parts(pointer, len)) }
     }
 
     #[test]
@@ -349,6 +349,72 @@ mod tests {
     #[test]
     fn tab_in_method() {
         let parsed = test_request(b"G\tT / HTTP/1.0\r\n\r\n", 0);
+        assert_eq!(-1, parsed.return_code);
+    }
+
+    #[test]
+    fn del_in_uri_path() {
+        let parsed = test_request(b"GET /\x7fhello HTTP/1.0\r\n\r\n", 0);
+        assert_eq!(-1, parsed.return_code);
+    }
+
+    #[test]
+    fn nul_in_header_name() {
+        let parsed = test_request(b"GET / HTTP/1.0\r\na\0b: c\r\n\r\n", 0);
+        assert_eq!(-1, parsed.return_code);
+    }
+
+    #[test]
+    fn nul_in_header_value() {
+        let parsed = test_request(b"GET / HTTP/1.0\r\nab: c\0d\r\n\r\n", 0);
+        assert_eq!(-1, parsed.return_code);
+    }
+
+    #[test]
+    fn ctl_in_header_name() {
+        let parsed = test_request(b"GET / HTTP/1.0\r\na\x1bb: c\r\n\r\n", 0);
+        assert_eq!(-1, parsed.return_code);
+    }
+
+    #[test]
+    fn ctl_in_header_value() {
+        let parsed = test_request(b"GET / HTTP/1.0\r\nab: c\x1b\r\n\r\n", 0);
+        assert_eq!(-1, parsed.return_code);
+    }
+
+    #[test]
+    fn invalid_char_in_header_value() {
+        let parsed = test_request(b"GET / HTTP/1.0\r\n/: 1\r\n\r\n", 0);
+        assert_eq!(-1, parsed.return_code);
+    }
+
+    #[test]
+    fn accept_msb_chars() {
+        let buf = b"GET /\xa0 HTTP/1.0\r\nh: c\xa2y\r\n\r\n";
+        let parsed = test_request(buf, 0);
+
+        assert_eq!(buf.len() as c_int, parsed.return_code);
+        assert_eq!(1, parsed.num_headers);
+        assert_eq!(b"/\xa0", parsed.path_bytes());
+        assert_eq!(0, parsed.version);
+        assert_eq!(b"h", header_name_bytes(parsed.headers[0]));
+        assert_eq!(b"c\xa2y", header_value_bytes(parsed.headers[0]));
+    }
+
+    #[test]
+    fn accept_pipe_tilde_though_forbidden_by_sse() {
+        let buf = b"GET / HTTP/1.0\r\n\x7c\x7e: 1\r\n\r\n";
+        let parsed = test_request(buf, 0);
+
+        assert_eq!(buf.len() as c_int, parsed.return_code);
+        assert_eq!(1, parsed.num_headers);
+        assert_eq!(b"\x7c\x7e", header_name_bytes(parsed.headers[0]));
+        assert_eq!(b"1", header_value_bytes(parsed.headers[0]));
+    }
+
+    #[test]
+    fn disallow_opening_brace() {
+        let parsed = test_request(b"GET / HTTP/1.0\r\n\x7b: 1\r\n\r\n", 0);
         assert_eq!(-1, parsed.return_code);
     }
 }
