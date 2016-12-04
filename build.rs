@@ -6,7 +6,7 @@ fn main() {
     config.file("deps/picohttpparser/picohttpparser.c");
     config.include("deps/picohttpparser");
 
-    if cfg!(target_feature = "sse4.1") || cfg!(target_feature = "sse4.2") {
+    if cfg!(target_feature = "sse4.2") {
         config.flag("-msse4");
     }
 
