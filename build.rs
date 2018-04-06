@@ -1,5 +1,5 @@
 #![cfg_attr(feature = "nightly", feature(cfg_target_feature))]
-extern crate gcc;
+extern crate cc;
 
 #[cfg(feature = "nightly")]
 fn is_enable_sse() -> bool {
@@ -12,19 +12,15 @@ fn is_enable_sse() -> bool {
 }
 
 fn main() {
-    let mut config = gcc::Config::new();
-    config.file("deps/picohttpparser/picohttpparser.c");
-    config.include("deps/picohttpparser");
+    let mut build = cc::Build::new();
 
     if is_enable_sse() {
-        config.flag("-msse4");
+        println!("Enabling SSE4.2");
+        build.flag("-msse4");
     }
 
-    config.compile("libpicohttpparser.a");
-
-    println!(
-        "cargo:rustc-link-search=native={}",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    println!("cargo:rustc-link-lib=static=picohttpparser");
+    build
+        .file("deps/picohttpparser/picohttpparser.c")
+        .include("deps/picohttpparser")
+        .compile("libpicohttpparser.a");
 }
