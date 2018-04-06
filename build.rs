@@ -15,7 +15,6 @@ fn main() {
     let mut build = cc::Build::new();
 
     if is_enable_sse() {
-        println!("Enabling SSE4.2");
         build.flag("-msse4");
     }
 
