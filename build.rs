@@ -1,12 +1,11 @@
-#![cfg_attr(feature = "nightly", feature(cfg_target_feature))]
 extern crate cc;
 
-#[cfg(feature = "nightly")]
+#[cfg(feature = "sse4")]
 fn is_enable_sse() -> bool {
-    cfg!(target_feature = "sse4.2")
+    true
 }
 
-#[cfg(not(feature = "nightly"))]
+#[cfg(not(feature = "sse4"))]
 fn is_enable_sse() -> bool {
     false
 }
