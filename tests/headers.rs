@@ -4,7 +4,6 @@ extern crate picohttpparser_sys;
 use libc::{c_char, c_int, size_t};
 use std::mem;
 use std::slice;
-use std::str;
 use picohttpparser_sys::*;
 
 fn slice_from_raw<'a>(pointer: *const c_char, len: size_t) -> &'a [u8] {
